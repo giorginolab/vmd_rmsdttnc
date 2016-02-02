@@ -1,0 +1,626 @@
+--- rmsdtt.tcl.yours	2010-09-09 18:52:17.000000000 +0200
++++ rmsdtt.tcl	2010-09-18 17:29:49.000000000 +0200
+@@ -1,15 +1,21 @@
+ #
+-#             RMSD Trajectory Tool v2.5
++#             RMSD+NC Trajectory Tool v3.0
+ #
+-# A GUI interface for RMSD alignment and analysis of trajectories
++# A GUI interface for RMSD alignment, native contacts computation, and
++# analysis of trajectories
+ #
+ # http://physiology.med.cornell.edu/faculty/hweinstein/vmdplugins/rmsdtt
+ 
+-# Author
+-# ------
++# Authors
++# -------
+ #      Luis Gracia, PhD
+ #      Weill Medical College, Cornel University, NY
+ #      lug2002@med.cornell.edu
++#
++#   Native contacts computation
++#      Toni Giorgino, PhD
++#      GRIB-IMIM-UPF, Barcelona
++#      toni.giorgino@gmail.com
+ 
+ # This plugin is based on the RMSD Tool plugin written by
+ #   Alexander Balaeff, PhD, TB Group, UIUC
+@@ -21,7 +27,7 @@
+ # See the index.html file distributed with this file. For more update documentation see
+ # http://physiology.med.cornell.edu/faculty/hweinstein/vmdplugins/rmsdtt
+ 
+-# $Id: rmsdtt.tcl 993 2010-08-02 19:53:22Z luis $
++# $Id: rmsdtt.tcl 410 2010-07-12 08:17:50Z toni $
+ 
+ package provide rmsdtt 3.0
+ 
+@@ -64,8 +70,14 @@
+   variable time_sw    0
+   variable time_ini   0.0
+   variable time_step  1.0
++  variable nc_sw      0;	# TONI
++  variable nc_frac_sw 0
++  variable nc_dist    7.0
++  variable nc_limit_sw   1
++  variable nc_dresid  0
++  variable nc_intermol 0
+   variable save_sw    0
+-  variable save_file  trajrmsd.dat
++  variable save_file  "traj.dat"
+   variable plot_sw    0
+   variable plot_program multiplot
+   variable colorize   1
+@@ -128,8 +140,9 @@
+   
+   menubutton $w.menubar.help -text "Help" -menu $w.menubar.help.menu -underline 0 -pady 2 
+   menu $w.menubar.help.menu -tearoff no
+-  $w.menubar.help.menu add command -label "About" -command [namespace current]::help_about
+-  $w.menubar.help.menu add command -label "Help..." -command "vmd_open_url http://physiology.med.cornell.edu/faculty/hweinstein/vmdplugins/rmsdtt/index.html"
++  $w.menubar.help.menu add command -label "RMSDTT plugin manual" -command "vmd_open_url http://physiology.med.cornell.edu/faculty/hweinstein/vmdplugins/rmsdtt/index.html"
++  $w.menubar.help.menu add command -label "Native contacts" -command "vmd_open_url http://www.multiscalelab.org/toni/RMSDTTNC"
++  $w.menubar.help.menu add command -label "About..." -command [namespace current]::help_about
+   pack $w.menubar.help -side right
+   
+   # top frame
+@@ -147,6 +160,10 @@
+   bind $w.top.left.sel <Return> "[namespace current]::draw_equiv"
+ 
+   labelframe $w.top.left.mods -text "Selection Modifiers" -relief ridge -bd 2
++  # Selection 2
++  text $w.top.left.selB -height 5 -width 25 -highlightthickness 0 -selectborderwidth 0 -exportselection yes -wrap word -relief sunken -bd 1 
++  $w.top.left.selB insert end "chain B"
++
+   pack $w.top.left.mods -side top -fill x
+   checkbutton $w.top.left.mods.bb -text "Backbone" -variable [namespace current]::bb_only -command "[namespace current]::ctrlbb bb"
+   checkbutton $w.top.left.mods.tr -text "Trace" -variable [namespace current]::trace_only -command "[namespace current]::ctrlbb trace"
+@@ -279,6 +296,49 @@
+     [namespace current]::iterativeFitGUI
+   }
+   
++
++  # Native contacts - TONI
++  frame $w.top.right.nc  -relief ridge -bd 2
++  pack  $w.top.right.nc  -side top -fill x
++
++  frame $w.top.right.nc.line1  -relief ridge -bd 0
++  pack  $w.top.right.nc.line1  -side top -fill x
++
++  checkbutton $w.top.right.nc.line1.0 -text "Native contacts" \
++                                      -variable [namespace current]::nc_sw \
++                                      -command [namespace current]::ctrlgui
++  checkbutton $w.top.right.nc.line1.frac -text "Fraction" \
++                                      -variable [namespace current]::nc_frac_sw
++
++  pack $w.top.right.nc.line1.0  -side left -anchor w
++  pack $w.top.right.nc.line1.frac -side right -anchor w
++
++
++  frame $w.top.right.nc.line2  -relief ridge -bd 0
++  pack  $w.top.right.nc.line2  -side top -fill x
++
++  label       $w.top.right.nc.line2.distancelabel -text "Distance:"
++  entry       $w.top.right.nc.line2.distance -width 6 -textvariable [namespace current]::nc_dist
++  checkbutton $w.top.right.nc.line2.intermol -text "Intermolecular" -state disable \
++      -variable [namespace current]::nc_intermol -command [namespace current]::ctrlgui
++
++  pack $w.top.right.nc.line2.intermol  -side left -anchor w
++  pack $w.top.right.nc.line2.distance  $w.top.right.nc.line2.distancelabel -side right -anchor w
++
++  frame $w.top.right.nc.line3  -relief ridge -bd 0
++  pack  $w.top.right.nc.line3  -side top -fill x
++
++  label       $w.top.right.nc.line3.dresidlabel -text "Ignore pairs when \u0394 resid < "
++  entry       $w.top.right.nc.line3.dresid -width 3 -textvariable [namespace current]::nc_dresid
++  rmsdtt::setTooltip $w.top.right.nc.line3.dresidlabel "Consider contact pairs only if spanning at least N monomers in the sequence (by resid attribute). 
++   0 - consider all contact pairs;
++   1 - ignore contacts within the same residue;
++   2 - also ignore contacts between neighboring monomers; and so on."
++
++  pack $w.top.right.nc.line3.dresid  $w.top.right.nc.line3.dresidlabel -side right -anchor w
++
++
++
+   # Data
+   frame $w.data -relief ridge -bd 2
+   pack $w.data -side top -fill both -expand yes
+@@ -373,6 +433,10 @@
+   variable rmsd_base
+   variable swap_sw
+   variable swap_print
++  variable nc_sw
++  variable nc_dist
++  variable nc_limit_sw
++  variable nc_intermol
+   variable rmsd
+   variable ref_mol
+   variable ref_frames
+@@ -387,6 +451,14 @@
+     showMessage "Selection is empty selection!"
+     return -code return
+   }
++
++  if {$nc_intermol} {
++      set rms_selB [[namespace current]::set_selB]
++      if {$rms_selB == ""} {
++	  showMessage "Selection B is empty!"
++	  return -code return
++      }
++  }
+   #puts "DEBUG: rms_sel: $rms_sel"
+ 
+   # Get reference mol/frames
+@@ -395,6 +467,30 @@
+     set sel_index [lindex [$datalist(mol) curselection] 0]
+   }
+ 
++  # TONI sanity checks for NC
++  if { $nc_sw } {
++      if {$rmsd_base == "ave" } {
++	  showMessage "Average not available for native contacts"
++	  return -code return
++      }
++      if { $nc_limit_sw } {
++	  set maxpairs 10000
++	  set sel_tmp [ atomselect $ref_mol $rms_sel ]
++	  if { $nc_intermol } {
++	  set sel_tmpB [ atomselect $ref_mol $rms_selB ]
++	      set np [ llength [ lindex [ measure contacts $nc_dist $sel_tmp $sel_tmpB ] 0 ] ]
++	  } else {
++	      set np [ llength [ lindex [ measure contacts $nc_dist $sel_tmp ] 0 ] ]
++	  }
++	  $sel_tmp delete
++	  if { $np > $maxpairs } {
++	      showMessage "Too many contact pairs ($np): disabling computation which may take too long. To fix, reduce atom selection and/or distance; or disable this warning deselecting Options > Abort if too many contacts"
++	      return -code return
++	  }
++      }
++  }
++	
++
+   if {$rmsd_base == "ave"} {
+     set ref_frames 0
+   } else {
+@@ -430,7 +526,7 @@
+     #puts $ave_coor
+   }
+ 
+-  # Check number of atoms
++  # Check number of atoms 
+   if {$rmsd_base == "ave"} {
+     set ref_natoms [llength $ave_coor]
+   } else {
+@@ -453,7 +549,30 @@
+     return -code return
+   }
+ 
+-  # Calculate rmsd and averages
++
++  # Check number of atoms  for selection B
++  if {$nc_intermol} {
++      set ref_natomsB [[atomselect $ref_mol $rms_selB frame 0] num]
++      if {$ref_natomsB == 0} {
++	  showMessage "No atoms have been selected!"
++	  return -code return
++      }
++
++      set message ""
++      foreach i $target_mol {
++	  if {[[atomselect $i $rms_selB frame 0] num] != $ref_natomsB } {
++	      append message "$ref_mol ($ref_natomsB)\t\t$i ([[atomselect $i $rms_selB frame 0] num])\n"
++	  }
++      }
++      if {$message != ""} {
++	  set message "Number of atoms in selection B differ for molecules:\n$message"
++	  showMessage $message
++	  return -code return
++      }
++  }
++
++
++  # Calculate rmsd and averages - will be called rmsd even if NC
+   array unset rmsd
+   array unset rms_ave
+   array unset rms_val
+@@ -461,6 +580,9 @@
+   if {$rmsd_base != "ave"} {
+     set ref_sel [atomselect $ref_mol $rms_sel]
+   }
++  if {$nc_intermol} {
++    set ref_selB [atomselect $ref_mol $rms_selB]
++  }
+   foreach i $target_mol {
+     set target_frames [[namespace current]::get_frames_for_mol $i]
+     #puts "DEBUG: target_frames($i): $target_frames"
+@@ -470,6 +592,9 @@
+       if {$rmsd_base != "ave"} {
+ 	$ref_sel frame $j
+       }
++      if {$nc_intermol} {
++	  $ref_selB frame $j
++      }
+       foreach k $target_frames {
+ 	if {$ref_mol == $i && $j == $k} {
+ 	  continue
+@@ -478,6 +603,14 @@
+ 	$target_sel frame $k
+ 	if {$rmsd_base == "ave"} {
+ 	  set rmsd($ref_mol:$j,$i:$k) [get_rmsd_ave $ave_coor $target_sel]
++	} elseif { $nc_sw } {
++	    if { $nc_intermol } {
++		set target_selB [atomselect $i $rms_selB ]
++		$target_selB frame $k
++		set rmsd($ref_mol:$j,$i:$k) [get_nc $ref_sel $target_sel $ref_selB $target_selB]
++	    } else {
++		set rmsd($ref_mol:$j,$i:$k) [get_nc $ref_sel $target_sel]
++	    }
+ 	} else {
+ 	  set rmsd($ref_mol:$j,$i:$k) [get_rmsd $ref_sel $target_sel]
+ 	}
+@@ -629,6 +762,183 @@
+ }
+ 
+ 
++
++# TONI - Computation of the native contacs. Compute the contact list
++# for sel1 (Reference), sel2 (Target), the remapping between the two,
++# measure the intersection.
++#
++# If passed four arguments, contact between 1/3 are checked into
++# 2/4. sel1B and sel2B are assumed to hold the same number of atoms.
++#
++# TODO
++#  - We could cache stuff maybe
++
++proc rmsdtt::get_nc { sel1 sel2 {sel1B 0} {sel2B 0} } {
++    variable nc_dist
++    variable nc_frac_sw
++    variable nc_dresid
++
++    # Prepare a map index->atomno in selections 1 and 2
++    array set i1n {}
++    array set i2n {}
++    set n 0
++    foreach idx1 [$sel1 get index]   idx2 [$sel2 get index] {
++	set i1n($idx1) $n
++	set i2n($idx2) $n
++	incr n
++    }
++
++    # Add atoms in selB if intermolecular
++    if { $sel1B != 0 } {
++	foreach idx1 [$sel1B get index]   idx2 [$sel2B get index] {
++	    set i1n($idx1) $n
++	    set i2n($idx2) $n
++	    incr n
++	}
++    }
++
++    # Prepare list of resids in reference
++    array set i1resid {}
++    if { $sel1B == 0 } {
++	foreach i [$sel1 get index] resid [$sel1 get resid] {
++	    set i1resid($i) $resid
++	}
++    }
++
++
++
++    # Get native contacts (sel1)
++    if { $sel1B != 0 } {
++	set nclist [transpose [ measure contacts $nc_dist $sel1 $sel1B ] ]
++#	puts "\nDEBUG: reference is [$sel1 text], sel1B is [$sel1B text], nclist has [llength $nclist]"
++    } else {
++	set nclist [transpose [ measure contacts $nc_dist $sel1 ] ]
++    }
++    set ncref_full [ llength $nclist ]
++
++    # Convert pair list as atomnos, removing close pairs if needed
++    set ncl {}
++    foreach pairs $nclist {
++	set i1 [lindex $pairs 0]
++	set i2 [lindex $pairs 1]
++	if { $sel1B == 0 } {
++	    if { [ expr abs( $i1resid($i1) - $i1resid($i2) ) ] < $nc_dresid } {
++		puts "DEBUG: Removing contact pair $i1-$i2 (resid $i1resid($i1) - $i1resid($i2)"
++		continue
++	    }
++	}
++	set p1 $i1n($i1)
++	set p2 $i1n($i2)
++	lappend ncl [ list $p1 $p2 ]
++    }
++    set ncref [ llength $ncl ]; # no. contacts in ref
++
++    # Get current contacts (sel2)
++    if { $sel1B != 0} {
++	set cclist [transpose [ measure contacts $nc_dist $sel2 $sel2B ] ]
++#	puts "\nDEBUG: target is [$sel2 text], sel2B is [$sel2B text], cclist has [llength $cclist]"
++    } else {
++	set cclist [transpose [ measure contacts $nc_dist $sel2 ] ]
++    }
++    set nccur [ llength $cclist ]; # no. current (unused)
++    set nnc 0;			 # no. native contacts, ie size of intersection
++                                 # between nclist and cclist
++    foreach pairs $cclist {
++	set p1 $i2n([lindex $pairs 0])
++	set p2 $i2n([lindex $pairs 1])
++	set cp [ list $p1 $p2 ]
++	set cpr [ list $p2 $p1 ]
++	if { [ lsearch $ncl $cp   ] != -1 ||
++	     [ lsearch $ncl $cpr  ] != -1 } {
++	    incr nnc
++	} 
++    }
++
++    puts "CONTACTS: $ncref_full in reference, $ncref removing close resids, $nccur in target, $nnc native"
++    if { $nc_frac_sw } {
++	return [ expr 1.0 * $nnc / $ncref ]
++    } else {
++	return $nnc
++    }
++}
++
++# TONI TOOLTIPS  From http://wiki.tcl.tk/1954
++proc rmsdtt::setTooltip {widget text} {
++        if { $text != "" } {
++                # 2) Adjusted timings and added key and button bindings. These seem to
++                # make artifacts tolerably rare.
++                bind $widget <Any-Enter>    [list after 500 [list rmsdtt::showTooltip %W $text]]
++                bind $widget <Any-Leave>    [list after 500 [list destroy %W.tooltip]]
++                bind $widget <Any-KeyPress> [list after 500 [list destroy %W.tooltip]]
++                bind $widget <Any-Button>   [list after 500 [list destroy %W.tooltip]]
++        }
++ }
++
++proc rmsdtt::showTooltip {widget text} {
++        global tcl_platform
++        if { [string match $widget* [winfo containing  [winfo pointerx .] [winfo pointery .]] ] == 0  } {
++                return
++        }
++
++        catch { destroy $widget.tooltip }
++
++        set scrh [winfo screenheight $widget]    ; # 1) flashing window fix
++        set scrw [winfo screenwidth $widget]     ; # 1) flashing window fix
++        set tooltip [toplevel $widget.tooltip -bd 1 -bg black]
++        wm geometry $tooltip +$scrh+$scrw        ; # 1) flashing window fix
++        wm overrideredirect $tooltip 1
++
++        if {$tcl_platform(platform) == {windows}} { ; # 3) wm attributes...
++                wm attributes $tooltip -topmost 1   ; # 3) assumes...
++        }                                           ; # 3) Windows
++        pack [label $tooltip.label -bg lightyellow -fg black -text $text -justify left]
++
++        set width [winfo reqwidth $tooltip.label]
++        set height [winfo reqheight $tooltip.label]
++
++        set pointer_below_midline [expr [winfo pointery .] > [expr [winfo screenheight .] / 2.0]]                ; # b.) Is the pointer in the bottom half of the screen?
++
++        set positionX [expr [winfo pointerx .] - round($width / 2.0)]    ; # c.) Tooltip is centred horizontally on pointer.
++        set positionY [expr [winfo pointery .] + 35 * ($pointer_below_midline * -2 + 1) - round($height / 2.0)]  ; # b.) Tooltip is displayed above or below depending on pointer Y position.
++
++        # a.) Ad-hockery: Set positionX so the entire tooltip widget will be displayed.
++        # c.) Simplified slightly and modified to handle horizontally-centred tooltips and the left screen edge.
++        if  {[expr $positionX + $width] > [winfo screenwidth .]} {
++                set positionX [expr [winfo screenwidth .] - $width]
++        } elseif {$positionX < 0} {
++                set positionX 0
++        }
++
++        wm geometry $tooltip [join  "$width x $height + $positionX + $positionY" {}]
++        raise $tooltip
++
++        # 2) Kludge: defeat rare artifact by passing mouse over a tooltip to destroy it.
++        bind $widget.tooltip <Any-Enter> {destroy %W}
++        bind $widget.tooltip <Any-Leave> {destroy %W}
++ }
++
++# pack [button .b -text hello]
++# setTooltip .b "Hello World!"
++
++
++
++proc rmsdtt::transpose matrix {
++    set cmd list
++    set i -1
++    foreach col [lindex $matrix 0] {append cmd " \$[incr i]"}
++    foreach row $matrix {
++        set i -1
++        foreach col $row {lappend [incr i] $col}
++    }
++    eval $cmd
++}
++
++
++
++
++
++
++
+ proc rmsdtt::get_rmsd { sel1 sel2 } {
+   variable swap_sw
+   variable swap_print
+@@ -1139,6 +1449,8 @@
+   variable ref_mol
+   variable ref_frames
+   variable plot_program
++  variable nc_frac_sw
++  variable nc_sw
+   global tcl_platform
+   
+   if {![array exists rmsd]} {
+@@ -1155,6 +1467,18 @@
+     set steps 1
+   }
+ 
++  # Prepare y-label
++  if {$nc_sw} {
++      if {$nc_frac_sw} {
++	  set nc_or_rmsd_label "Fraction of native contacts"
++      } else {
++	  set nc_or_rmsd_label "Native contacts"
++      }
++  } else {
++      set nc_or_rmsd_label "Rmsd (A)"
++  }
++
++
+   # Retrieve mols and frames
+   set maxframe 0
+   foreach key [array names rmsd] {
+@@ -1197,13 +1521,13 @@
+     }
+     
+     if {$time_sw} {
+-      set title "Rmsd vs Time \"$rms_sel)\""
++      set title "$nc_or_rmsd_label vs Time \"$rms_sel)\""
+       set xlab "Time"
+     } else {
+-      set title "Rmsd vs Frame \"$rms_sel\""
++      set title "$nc_or_rmsd_label vs Frame \"$rms_sel\""
+       set xlab "Frame"
+     }
+-    set ylab "Rmsd (A)"
++    set ylab "$nc_or_rmsd_label"
+     set plothandle [multiplot -title $title -xlabel $xlab -ylabel $ylab -nostats]
+     
+     set k 0
+@@ -1240,13 +1564,13 @@
+       puts $pipe_id "@ with g0"
+       puts $pipe_id "@ subtitle \"$rms_sel\""
+       if {$time_sw} {
+-	puts $pipe_id "@ title \"Rmsd vs Time\""
++	puts $pipe_id "@ title \"$nc_or_rmsd_label vs Time\""
+ 	puts $pipe_id "@ xaxis  label \"Time\""
+       } else {
+-	puts $pipe_id "@ title \"Rmsd vs Frame\""
++	puts $pipe_id "@ title \"$nc_or_rmsd_label vs Frame\""
+ 	puts $pipe_id "@ xaxis  label \"Frame\""
+       }
+-      puts $pipe_id "@ yaxis  label \"Rmsd (A)\""
++      puts $pipe_id "@ yaxis  label \"$nc_or_rmsd_label\""
+       puts $pipe_id "@ TYPE xy"
+       puts $pipe_id "@ view 0.15, 0.15, 0.75, 0.85"
+       puts $pipe_id "@ legend on"
+@@ -1300,10 +1624,10 @@
+       
+       set cells [$worksheet Cells]
+       if {$time_sw} {
+-	set exceltitle "Rmsd vs Time"
++	set exceltitle "$nc_or_rmsd_label vs Time"
+ 	$cells Item 1 1 "Time"
+       } else {
+-	set exceltitle "Rmsd vs Frame"
++	set exceltitle "$nc_or_rmsd_label vs Frame"
+ 	$cells Item 1 1 "Frame"
+       }
+ 
+@@ -1339,7 +1663,7 @@
+       set yaxis [$axes Item 2]
+       $yaxis HasMajorGridlines 0
+       $yaxis HasTitle 1
+-      [$yaxis AxisTitle] Text "Rmsd (A)"
++      [$yaxis AxisTitle] Text "$nc_or_rmsd_label"
+     
+     } else {
+       showMessage "Plotting in MS Excel only availabe for Windows systems"
+@@ -1375,6 +1699,33 @@
+ }
+ 
+ 
++proc rmsdtt::set_selB {} {
++  variable w
++  variable bb_only
++  variable trace_only
++  variable noh
++  variable swap_sw
++  variable bb_def
++
++#  set a [$w.top.left.sel get 1.0 end]
++#  puts "a <$a>"
++  regsub -all "\#.*?\n" [$w.top.left.selB get 1.0 end] "" temp1
++  regsub -all "\n" $temp1 " " temp2
++  regsub -all " $" $temp2 "" temp3
++#  puts "c <$temp3>"
++  if { $trace_only } {
++    append rms_sel "($temp3) and name CA"
++  } elseif { $bb_only } {
++    append rms_sel "($temp3) and name $bb_def"
++  } elseif { $noh || $swap_sw} {
++    append rms_sel "($temp3) and noh"
++  } else {
++    append rms_sel $temp3
++  }
++  return $rms_sel
++}
++
++
+ proc rmsdtt::get_frames_for_mol { mol } {
+   variable skip_sw
+   variable skip_start
+@@ -1452,6 +1803,9 @@
+   variable equiv_sw
+   variable equiv_byres
+   variable equiv_atom
++  variable nc_sw
++  variable nc_frac_sw
++  variable nc_intermol
+   variable noh
+   variable weighted_sw
+ 
+@@ -1534,6 +1888,38 @@
+     $w.top.right.traj.skip.steps config -state disable
+   }
+ 
++  # TONI Native contacts UPDATE GUI
++  if {$nc_sw} {
++      $w.top.right.nc.line1.frac          config -state normal
++      $w.top.right.nc.line2.distancelabel config -state normal
++      $w.top.right.nc.line2.distance      config -state normal
++      $w.top.right.nc.line2.intermol      config -state normal
++      $w.top.right.pushfr.rmsd config -text "Native Contacts"
++      $w.top.right.pushfr.align config -state disable
++      if {$nc_intermol} {
++	  pack $w.top.left.selB -side top -fill both -expand yes -after $w.top.left.sel
++	  $w.top.right.nc.line3.dresidlabel   config -state disable
++	  $w.top.right.nc.line3.dresid        config -state disable
++      } else {
++	  pack forget $w.top.left.selB
++	  $w.top.right.nc.line3.dresidlabel   config -state normal
++	  $w.top.right.nc.line3.dresid        config -state normal
++      }
++  } else {
++      $w.top.right.nc.line1.frac          config -state disable
++      $w.top.right.nc.line2.distancelabel config -state disable
++      $w.top.right.nc.line2.distance      config -state disable
++      $w.top.right.nc.line2.intermol      config -state disable
++      $w.top.right.nc.line3.dresidlabel   config -state disable
++      $w.top.right.nc.line3.dresid        config -state disable
++      $w.top.right.pushfr.rmsd config -text "RMSD"
++      # $w.top.right.ref.1 -state normal
++      $w.top.right.pushfr.align config -state normal
++      set nc_intermol 0
++      pack forget $w.top.left.selB
++  }
++
++
+   if {$swap_use} {
+     if {$swap_sw} {
+       set noh 0
+@@ -1788,6 +2174,15 @@
+ 
+ Copyright (C) 2006 Luis Gracia <lug2002@med.cornell.edu> 
+ 
++Native contacts:
++
++Toni Giorgino
++Computational Biochemistry and Biophysics Lab
++GRIB-IMIM-UPF 
++Barcelona Biomedical Research Parc
++
++Copyright (C) 2010 Toni Giorgino <toni.giorgino@gmail.com>
++
+ "
+ }
+ 
