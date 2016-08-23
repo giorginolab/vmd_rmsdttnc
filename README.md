@@ -3,7 +3,7 @@ RMSD trajectory tool enhanced with native contacts
 
 This extension enables VMD to compute the number of native contacts in a trajectory. It is a modification of the [RMSD Trajectory Tool](http://physiology.med.cornell.edu/faculty/hweinstein/vmdplugins/rmsdtt/), of which it shares the interface.
 
-Toni Giorgino -- developed at the Universitat Pompeu Fabra in 2010.
+Toni Giorgino
 
 Usage
 -----
@@ -62,6 +62,8 @@ Licensing
 ---------
 
 Author of the patch: Toni Giorgino (contact and support: at gmail.com)
+
+Code developed at the Computational Biophysics Laboratory of the Universitat Pompeu Fabra in 2010.
 
 The present patch files are distributed under the same terms of the original code.
 
