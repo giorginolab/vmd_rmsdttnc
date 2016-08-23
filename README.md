@@ -51,6 +51,13 @@ Installation under Windows may be performed following one of the three options:
 
 -   or, install a cygwin development system, which will include the patch utility.
 
+
+Citation
+--------
+
+A description of the logic used for the computation is found in section 4.2 of the paper [PLUMED-GUI: an environment for the interactive development of molecular dynamics analysis and biasing scripts](http://arxiv.org/abs/1312.3190).
+
+
 Licensing
 ---------
 
